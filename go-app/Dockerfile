@@ -105,7 +105,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /http-server-projeto-k
 #   debugar em produção é enorme quando algo dá errado às 3 da manhã.
 # =============================================================================
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 # -------------------------------------------------------------------------
 # Criar usuário não-root
