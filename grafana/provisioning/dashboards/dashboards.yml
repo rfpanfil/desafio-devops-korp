@@ -1,0 +1,26 @@
+# =============================================================================
+# Grafana — Provisioning de Dashboards
+# =============================================================================
+#
+# CONCEITO: Este arquivo diz ao Grafana ONDE encontrar os dashboards
+# pré-configurados (arquivos JSON). Quando o Grafana inicia, ele:
+#   1. Lê este arquivo
+#   2. Procura JSONs na pasta configurada
+#   3. Importa automaticamente como dashboards
+#
+# "disableDeletion: false" = permite deletar pela UI (útil para dev)
+# "updateIntervalSeconds: 10" = verifica mudanças a cada 10s
+# =============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: "Default"
+    orgId: 1
+    folder: ""                                    # Pasta raiz
+    type: file                                    # Lê de arquivos locais
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards           # Pasta dentro do container
+      foldersFromFilesStructure: false

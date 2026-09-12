@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Maintain GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps/actions):"
+    groups:
+      actions-updates:
+        patterns:
+          - "*"
+
+  # Maintain pip packages
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps/pip):"
+    groups:
+      # Os scanners críticos são atualizados em conjunto (incluindo major)
+      # para manter a unidade operacional da toolchain de segurança.
+      security-scanners:
+        patterns:
+          - "bandit"
+          - "pip-audit"
+          - "safety"
+      # Apenas minor/patch entram no catch-all.
+      # Major updates ficam fora deste grupo e devem ser validadas individualmente.
+      other-utilities:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

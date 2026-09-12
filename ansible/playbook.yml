@@ -1,0 +1,92 @@
+# =============================================================================
+# Playbook Principal — Projeto Korp DevOps Challenge
+# =============================================================================
+#
+# CONCEITO: O playbook é o "script mestre" do Ansible. Ele define:
+#   - Em quais máquinas executar (hosts: all)
+#   - Quais roles executar e em que ordem
+#   - Tarefas finais de validação
+#
+# REQUISITO DO DESAFIO: "O ambiente deve ser totalmente provisionado
+# com um único comando Ansible"
+#
+# Comando: ansible-playbook -i ansible/inventory/hosts.yml ansible/playbook.yml
+# =============================================================================
+
+---
+- name: Projeto Korp — Provisionamento Completo do Ambiente DevOps
+  hosts: all
+  gather_facts: yes
+
+  # -------------------------------------------------------------------------
+  # ROLES: Executados em ordem
+  # -------------------------------------------------------------------------
+  #
+  # CONCEITO: Roles são "capítulos" do playbook. Cada um cuida de um
+  # assunto específico. São executados na ordem listada.
+  #
+  # 1. docker  → Instala Docker e Docker Compose
+  # 2. app     → Builda e deploya a aplicação (Go + Nginx + Prometheus + Grafana)
+  # 3. monitoring → Valida que o monitoramento está funcionando
+  # -------------------------------------------------------------------------
+
+  roles:
+    - role: docker
+      tags: [docker, setup]
+
+    - role: app
+      tags: [app, deploy]
+
+    - role: monitoring
+      tags: [monitoring, verify]
+
+  # -------------------------------------------------------------------------
+  # TASKS FINAIS: Validação do serviço (requisito do desafio)
+  # -------------------------------------------------------------------------
+  #
+  # REQUISITO: "validação do funcionamento do serviço desenvolvido através
+  # de uma requisição HTTP, e posterior exibição da resposta no console"
+  # -------------------------------------------------------------------------
+
+  tasks:
+    - name: "============================================"
+      debug:
+        msg: "VALIDAÇÃO FINAL DO SERVIÇO"
+      tags: [validate]
+
+    - name: Realizar requisição HTTP ao serviço
+      uri:
+        url: "{{ test_endpoint }}"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: service_response
+      tags: [validate]
+
+    - name: "✅ RESPOSTA DO SERVIÇO http-server-projeto-korp"
+      debug:
+        msg: "{{ service_response.json }}"
+      tags: [validate]
+
+    - name: Listar containers em execução
+      command: docker compose ps --format "table {{'{{'}}.Name{{'}}'}}\t{{'{{'}}.Status{{'}}'}}\t{{'{{'}}.Ports{{'}}'}}"
+      args:
+        chdir: "{{ project_dir }}"
+      register: containers_status
+      changed_when: false
+      tags: [validate]
+
+    - name: "📊 STATUS DOS CONTAINERS"
+      debug:
+        msg: "{{ containers_status.stdout_lines }}"
+      tags: [validate]
+
+    - name: "============================================"
+      debug:
+        msg: >
+          PROVISIONAMENTO CONCLUÍDO COM SUCESSO!
+          Serviços disponíveis:
+          - API: http://localhost:{{ nginx_port }}/projeto-korp
+          - Prometheus: http://localhost:{{ prometheus_port }}
+          - Grafana: http://localhost:{{ grafana_port }}
+      tags: [validate]

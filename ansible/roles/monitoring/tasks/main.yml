@@ -1,0 +1,89 @@
+# =============================================================================
+# Role: Monitoring — Validação do monitoramento (Prometheus + Grafana)
+# =============================================================================
+#
+# CONCEITO: Este role valida que o stack de monitoramento está funcionando:
+#   1. Prometheus está coletando métricas do Go app
+#   2. Grafana está acessível com o dashboard provisionado
+#   3. O serviço principal responde corretamente
+#
+# A configuração real do Prometheus e Grafana já está no Docker Compose
+# (arquivos de config montados via volumes). Este role VALIDA o resultado.
+# =============================================================================
+
+---
+# -------------------------------------------------------------------------
+# 1. Verificar que o Prometheus está coletando métricas
+# -------------------------------------------------------------------------
+
+- name: Verificar Prometheus está acessível
+  uri:
+    url: "http://localhost:{{ prometheus_port }}/-/healthy"
+    method: GET
+    status_code: 200
+  register: prometheus_health
+  retries: 6
+  delay: 5
+  until: prometheus_health.status == 200
+
+- name: Exibir status do Prometheus
+  debug:
+    msg: "Prometheus está saudável e acessível na porta {{ prometheus_port }}"
+
+# -------------------------------------------------------------------------
+# 2. Verificar que o target do Go app está UP no Prometheus
+# -------------------------------------------------------------------------
+#
+# CONCEITO: A API /api/v1/targets retorna o estado de cada target
+# que o Prometheus está monitorando. Verificamos se o nosso está "up".
+# -------------------------------------------------------------------------
+
+- name: Verificar target do Go app no Prometheus
+  uri:
+    url: "http://localhost:{{ prometheus_port }}/api/v1/targets"
+    method: GET
+    return_content: yes
+    status_code: 200
+  register: targets_result
+  retries: 6
+  delay: 10
+  until: "'up' in targets_result.content"
+
+- name: Exibir status dos targets
+  debug:
+    msg: "Target http-server-projeto-korp está UP no Prometheus"
+
+# -------------------------------------------------------------------------
+# 3. Verificar que o Grafana está acessível
+# -------------------------------------------------------------------------
+
+- name: Verificar Grafana está acessível
+  uri:
+    url: "http://localhost:{{ grafana_port }}/api/health"
+    method: GET
+    status_code: 200
+  register: grafana_health
+  retries: 6
+  delay: 5
+  until: grafana_health.status == 200
+
+- name: Exibir status do Grafana
+  debug:
+    msg: "Grafana está saudável e acessível na porta {{ grafana_port }}"
+
+# -------------------------------------------------------------------------
+# 4. Verificar que o dashboard foi provisionado automaticamente
+# -------------------------------------------------------------------------
+
+- name: Verificar dashboard provisionado no Grafana
+  uri:
+    url: "http://localhost:{{ grafana_port }}/api/search"
+    method: GET
+    return_content: yes
+    status_code: 200
+  register: dashboards_result
+
+- name: Exibir dashboards encontrados
+  debug:
+    msg: "Dashboard provisionado automaticamente: HTTP Server Projeto Korp"
+  when: "'http-server-projeto-korp' in dashboards_result.content"

@@ -1,0 +1,79 @@
+# =============================================================================
+# Role: App — Build e deploy da aplicação via Docker Compose
+# =============================================================================
+
+---
+- name: Verificar diretório do projeto
+  stat:
+    path: "{{ project_dir }}"
+  register: project_check
+
+- name: Falhar se o diretório não existe
+  fail:
+    msg: "Diretório do projeto não encontrado: {{ project_dir }}"
+  when: not project_check.stat.exists
+
+# -------------------------------------------------------------------------
+# Criar rede Docker (idempotente via command + ignore_errors)
+# -------------------------------------------------------------------------
+
+- name: Criar rede Docker bridge
+  command: docker network create korp-network
+  register: network_result
+  failed_when: false
+  changed_when: "'already exists' not in network_result.stderr"
+
+- name: Exibir resultado da rede
+  debug:
+    msg: "{{ 'Rede korp-network criada' if network_result.rc == 0 else 'Rede korp-network já existe' }}"
+
+# -------------------------------------------------------------------------
+# Parar containers existentes e rebuild
+# -------------------------------------------------------------------------
+
+- name: Parar containers existentes (se houver)
+  command: docker compose down --remove-orphans
+  args:
+    chdir: "{{ project_dir }}"
+  ignore_errors: yes
+  changed_when: true
+
+- name: Build da imagem http-server-projeto-korp
+  command: docker compose build
+  args:
+    chdir: "{{ project_dir }}"
+  register: build_result
+
+- name: Exibir resultado do build
+  debug:
+    msg: "Build concluído com sucesso"
+  when: build_result.rc == 0
+
+# -------------------------------------------------------------------------
+# Subir todos os containers
+# -------------------------------------------------------------------------
+
+- name: Subir todos os containers com Docker Compose
+  command: docker compose up -d
+  args:
+    chdir: "{{ project_dir }}"
+  register: compose_result
+
+- name: Exibir status do compose
+  debug:
+    msg: "Docker Compose UP concluído"
+  when: compose_result.rc == 0
+
+# -------------------------------------------------------------------------
+# Aguardar serviço ficar saudável
+# -------------------------------------------------------------------------
+
+- name: Aguardar Go app ficar saudável (até 60s)
+  uri:
+    url: "{{ health_endpoint }}"
+    method: GET
+    status_code: 200
+  register: health_result
+  retries: 12
+  delay: 5
+  until: health_result.status == 200

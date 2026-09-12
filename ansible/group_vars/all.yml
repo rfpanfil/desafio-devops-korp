@@ -1,0 +1,29 @@
+# =============================================================================
+# Ansible Group Variables — Variáveis globais do projeto
+# =============================================================================
+#
+# CONCEITO: Variáveis definidas aqui estão disponíveis para TODOS os roles.
+# É como um "config global" que evita repetir valores em vários arquivos.
+#
+# Se amanhã quiser mudar o nome do projeto ou a porta, muda só aqui.
+# =============================================================================
+
+# Nome do projeto (usado no Docker, diretórios, etc.)
+project_name: "projeto-korp"
+
+# Diretório onde o projeto está no servidor
+# NOTA: No WSL2, o disco E: é acessado via /mnt/e/
+project_dir: "/mnt/e/Documentos/Portifólio GITHUB/Projeto Korp Dashboard"
+
+# Configurações do Docker Compose
+compose_file: "docker-compose.yml"
+
+# Portas dos serviços (para validação)
+app_port: 8080
+nginx_port: 80
+prometheus_port: 9090
+grafana_port: 3001
+
+# Endpoint de teste
+test_endpoint: "http://localhost:80/projeto-korp"
+health_endpoint: "http://localhost:80/health"

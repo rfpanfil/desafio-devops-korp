@@ -1,0 +1,173 @@
+name: Security Audit Gate
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit-native:
+    name: Native Security Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+    - name: Set up Python
+      uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+      with:
+        python-version: '3.12'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+      with:
+        node-version: '20'
+
+    - name: Run Gitleaks
+      uses: gitleaks/gitleaks-action@2898b82df1b9185a0654ea2c5d197609a6396b27 # v2.3.6
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install Native Security Tools
+      timeout-minutes: 5
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        pip install --require-hashes -r security-requirements.txt
+
+    - name: Run audit.sh (Native)
+      timeout-minutes: 10
+      run: |
+        set -euo pipefail
+        chmod +x ./audit.sh
+        ./audit.sh --engine native
+
+  scanner-status:
+    name: Scanner Configuration Status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Report Status
+      env:
+        IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      run: |
+        echo "=== SECURITY PIPELINE STATUS ==="
+        if [[ "$IS_FORK" == "true" ]]; then
+          echo "Context: Untrusted Fork PR."
+          echo "Snyk and Semgrep will NOT execute (Secrets are protected)."
+          echo "Mandatory coverage is provided by audit-native."
+        else
+          echo "Context: Trusted."
+          echo "Snyk and Semgrep will execute if tokens are configured."
+        fi
+
+  audit-snyk:
+    name: Snyk Enterprise Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    # Evita erros de secret em PRs originados de forks
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+    - name: Report scanner status
+      if: env.SNYK_TOKEN == ''
+      run: |
+        echo "Snyk não executado: token ausente ou contexto não confiável."
+        echo "A cobertura obrigatória permanece no audit-native."
+    - name: Checkout repository
+      if: env.SNYK_TOKEN != ''
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - name: Run Snyk Open Source & Code
+      if: env.SNYK_TOKEN != ''
+      uses: snyk/actions/setup@b98d498629f1c368650224d6d212bf7dfa89e4bf # v4.0.0
+    - name: Execute Snyk Audit
+      if: env.SNYK_TOKEN != ''
+      timeout-minutes: 10
+      run: |
+        chmod +x ./audit.sh
+        ./audit.sh --engine snyk
+
+  audit-semgrep:
+    name: Semgrep Pro Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    # Evita erros de secret em PRs originados de forks
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+    steps:
+    - name: Report scanner status
+      if: env.SEMGREP_APP_TOKEN == ''
+      run: |
+        echo "Semgrep Pro não executado: token ausente ou contexto não confiável."
+        echo "A cobertura obrigatória permanece no audit-native."
+    - name: Checkout repository
+      if: env.SEMGREP_APP_TOKEN != ''
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - name: Run Semgrep CI
+      if: env.SEMGREP_APP_TOKEN != ''
+      timeout-minutes: 10
+      uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1.9.0
+      with:
+        config: "p/default"
+
+  security-gate:
+    name: Security Gate Aggregate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [audit-native, audit-snyk, audit-semgrep]
+    if: always()
+    steps:
+    - name: Evaluate Aggregate Status
+      run: |
+        # AVISO: Configure apenas ESTE job (security-gate) como Status Check obrigatório no Branch Protection.
+        # Não marque audit-snyk ou audit-semgrep individualmente como obrigatórios, pois esses jobs são deliberadamente pulados em PRs de forks.
+        
+        echo "=== AGGREGATE GATE STATUS ==="
+        echo "audit-native: ${{ needs.audit-native.result }}"
+        echo "audit-snyk: ${{ needs.audit-snyk.result }}"
+        echo "audit-semgrep: ${{ needs.audit-semgrep.result }}"
+        
+        # audit-native MUST pass (success only)
+        if [[ "${{ needs.audit-native.result }}" != "success" ]]; then
+          echo "Error: audit-native did not succeed. Blocking PR."
+          exit 1
+        fi
+        
+        # Snyk allowlist
+        case "${{ needs.audit-snyk.result }}" in
+          success|skipped)
+            ;;
+          *)
+            echo "Error: audit-snyk terminou em estado não permitido (${{ needs.audit-snyk.result }}). Blocking PR."
+            exit 1
+            ;;
+        esac
+        
+        # Semgrep allowlist
+        case "${{ needs.audit-semgrep.result }}" in
+          success|skipped)
+            ;;
+          *)
+            echo "Error: audit-semgrep terminou em estado não permitido (${{ needs.audit-semgrep.result }}). Blocking PR."
+            exit 1
+            ;;
+        esac
+        
+        echo "All security gates passed successfully."

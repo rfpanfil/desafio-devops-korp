@@ -1,0 +1,170 @@
+# =============================================================================
+# Docker Compose — Orquestração de todos os containers
+# =============================================================================
+#
+# CONCEITO: Este arquivo é a "receita mestra" que define:
+#   - Quais containers existem (services)
+#   - Como eles se comunicam (networks)
+#   - Que arquivos do seu PC eles acessam (volumes)
+#   - Em que ordem eles iniciam (depends_on)
+#
+# Com UM comando (docker compose up), tudo sobe na ordem certa.
+# Com outro (docker compose down), tudo desce limpo.
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Container 1: Aplicação Go (http-server-projeto-korp)
+  # ===========================================================================
+  #
+  # CONCEITO: Este é o "coração" do sistema — o servidor que responde
+  # às requisições. Ele NÃO expõe portas ao host (sem "ports:").
+  # Só é acessível pela rede interna Docker (korp-network).
+  #
+  # Quem acessa ele? Apenas o Nginx (que está na mesma rede).
+  # ===========================================================================
+
+  http-server-projeto-korp:
+    build:
+      context: ./go-app            # Pasta onde está o Dockerfile
+      dockerfile: Dockerfile       # Nome do Dockerfile (padrão)
+    container_name: http-server-projeto-korp
+    networks:
+      - korp-network               # Conecta à rede interna
+    # SEM "ports:" → NÃO acessível de fora (requisito do desafio)
+    restart: unless-stopped        # Reinicia automaticamente se cair
+    healthcheck:
+      # CONCEITO: Docker executa este comando periodicamente para saber
+      # se o container está saudável. Se falhar X vezes seguidas,
+      # Docker marca como "unhealthy" e pode reiniciar.
+      #
+      # wget: ferramenta para fazer HTTP requests (disponível no Alpine)
+      #   --spider: só verifica se a URL existe (não baixa conteúdo)
+      #   -q: modo silencioso (sem output)
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s    # Verifica a cada 10 segundos
+      timeout: 3s      # Se não responder em 3s, considera falha
+      retries: 3       # Após 3 falhas seguidas, marca como unhealthy
+      start_period: 5s # Espera 5s antes de começar a verificar (tempo para iniciar)
+
+  # ===========================================================================
+  # Container 2: Nginx (Reverse Proxy)
+  # ===========================================================================
+  #
+  # CONCEITO: O Nginx é a "porta de entrada" — o ÚNICO container
+  # acessível de fora. Ele recebe pedidos na porta 80 e encaminha
+  # para o Go app na porta 8080 (via rede interna).
+  #
+  # "ports: 80:80" significa:
+  #   porta_do_seu_PC:porta_dentro_do_container
+  #   "Quando alguém acessar a porta 80 do meu PC,
+  #    redirecione para a porta 80 do container Nginx"
+  # ===========================================================================
+
+  nginx:
+    image: nginx:1.27-alpine       # Imagem oficial do Nginx (Alpine = leve)
+    container_name: nginx-proxy
+    ports:
+      - "80:80"                    # Porta 80 do host → porta 80 do container
+    volumes:
+      # CONCEITO: Monta a pasta de config do seu PC dentro do container.
+      # ":ro" = read-only (o container só pode LER, não modificar).
+      # Isso garante que mesmo se o Nginx for comprometido, ele
+      # não consegue alterar suas próprias configurações.
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - korp-network
+    depends_on:
+      http-server-projeto-korp:
+        # CONCEITO: "condition: service_healthy" faz o Nginx esperar
+        # até que o Go app esteja SAUDÁVEL (healthcheck passando).
+        #
+        # Sem isso, o Nginx poderia iniciar antes do Go app e
+        # retornar "502 Bad Gateway" para os primeiros pedidos.
+        #
+        # TRADEOFF: "depends_on" sozinho (sem condition) apenas espera
+        # o container INICIAR — não espera ficar PRONTO.
+        # Com condition: service_healthy, espera de verdade.
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Container 3: Prometheus (Coletor de Métricas)
+  # ===========================================================================
+  #
+  # CONCEITO: Prometheus é o "termômetro" do sistema.
+  # Ele vai ao Go app a cada 10 segundos, lê as métricas em /metrics,
+  # e armazena num banco de dados temporal (time-series database).
+  #
+  # NÃO precisa instalar nada no seu PC — roda dentro do container!
+  # A imagem oficial prom/prometheus já vem com tudo pronto.
+  # ===========================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.54.0      # Imagem oficial do Prometheus
+    container_name: prometheus
+    volumes:
+      # Monta a configuração de scraping (que targets monitorar)
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"                     # Acessível em http://localhost:9090
+    networks:
+      - korp-network
+    depends_on:
+      http-server-projeto-korp:
+        condition: service_healthy       # Espera o Go app estar saudável
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Container 4: Grafana (Painel Visual de Métricas)
+  # ===========================================================================
+  #
+  # CONCEITO: Grafana transforma números em gráficos bonitos.
+  # Ele lê os dados do Prometheus e desenha dashboards interativos.
+  #
+  # PROVISIONING AUTOMÁTICO (bônus do desafio!):
+  #   - datasource.yml → configura Prometheus como fonte de dados
+  #   - dashboards.yml → diz onde estão os dashboards JSON
+  #   - *.json → o dashboard em si (8 painéis pré-configurados)
+  #
+  # Quando o Grafana inicia, tudo está pronto — sem cliques manuais.
+  # ===========================================================================
+
+  grafana:
+    image: grafana/grafana:11.2.0       # Imagem oficial do Grafana
+    container_name: grafana
+    volumes:
+      # Provisioning: configuração automática de datasources e dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      # Credenciais de acesso ao Grafana
+      # CONCEITO: Em produção, NUNCA hardcode senhas. Usaríamos um
+      # secret manager (AWS Secrets, Vault, etc.). Em dev, é aceitável.
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=korp2026
+      # Desabilita tela de login para facilitar a demo na entrevista
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    ports:
+      - "3001:3000"                     # Acessível em http://localhost:3001
+    networks:
+      - korp-network
+    depends_on:
+      - prometheus                       # Espera Prometheus subir primeiro
+    restart: unless-stopped
+
+# =============================================================================
+# NETWORKS: Redes virtuais
+# =============================================================================
+#
+# CONCEITO: Uma rede Docker bridge é como um "corredor interno" de um prédio.
+# Containers na mesma rede se enxergam pelo NOME do serviço.
+#
+# Todos os 4 containers (Go, Nginx, Prometheus, Grafana) estão na mesma rede.
+# =============================================================================
+
+networks:
+  korp-network:
+    driver: bridge
+    name: korp-network

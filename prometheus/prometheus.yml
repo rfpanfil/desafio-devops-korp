@@ -1,0 +1,67 @@
+# =============================================================================
+# Prometheus — Configuração de Scraping
+# =============================================================================
+#
+# CONCEITO: Este arquivo diz ao Prometheus:
+#   "A cada X segundos, vá buscar métricas nestes endereços"
+#
+# Prometheus funciona no modelo PULL (ele vai buscar), não PUSH (a app envia).
+# Isso é como um médico que vai ao paciente fazer check-up,
+# ao invés do paciente ligar toda hora dizendo como está.
+#
+# Vantagem do PULL:
+#   - Prometheus controla a frequência (não fica sobrecarregado)
+#   - Se um serviço cair, Prometheus detecta (deixa de responder)
+#   - Mais simples: a app só precisa expor /metrics, não precisa saber
+#     para onde enviar os dados
+# =============================================================================
+
+# Configurações globais (aplicam a todos os jobs)
+global:
+  scrape_interval: 15s      # De quanto em quanto tempo coleta métricas
+  evaluation_interval: 15s  # De quanto em quanto tempo avalia alertas
+
+# =============================================================================
+# SCRAPE CONFIGS: Quais serviços monitorar
+# =============================================================================
+#
+# Cada "job" é um grupo de alvos (targets) que o Prometheus vai raspar.
+# Um alvo = um endereço + porta onde existe um endpoint /metrics.
+# =============================================================================
+
+scrape_configs:
+  # -------------------------------------------------------------------------
+  # Job 1: Monitorar o próprio Prometheus
+  #
+  # CONCEITO: O Prometheus também expõe métricas sobre si mesmo!
+  # Isso permite monitorar se o Prometheus está saudável:
+  #   - Quantos targets está monitorando
+  #   - Quanto espaço de disco está usando
+  #   - Quanto tempo cada scrape leva
+  # -------------------------------------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # -------------------------------------------------------------------------
+  # Job 2: Monitorar o http-server-projeto-korp
+  #
+  # CONCEITO:
+  #   - job_name: nome que aparece como label nas métricas
+  #   - targets: endereço:porta onde buscar /metrics
+  #
+  # "http-server-projeto-korp:8080" funciona porque Prometheus está
+  # na MESMA rede Docker (korp-network). O Docker resolve o nome
+  # do serviço para o IP do container automaticamente.
+  #
+  # scrape_interval: 10s — coletamos mais frequentemente que o default
+  # porque queremos resposta rápida no dashboard.
+  #
+  # TRADEOFF: scrape_interval muito baixo (ex: 1s) gera mais dados
+  # e mais carga. Muito alto (ex: 60s) pode perder picos curtos.
+  # 10s é um bom equilíbrio para um serviço simples.
+  # -------------------------------------------------------------------------
+  - job_name: "http-server-projeto-korp"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["http-server-projeto-korp:8080"]

@@ -1,0 +1,27 @@
+# =============================================================================
+# Grafana — Provisioning de Datasource
+# =============================================================================
+#
+# CONCEITO: "Provisioning" = configuração automática.
+# Ao invés de abrir o Grafana no navegador e configurar manualmente
+# (clicar em "Add Data Source" → preencher formulário), este arquivo
+# faz isso AUTOMATICAMENTE quando o Grafana inicia.
+#
+# Isso é ESSENCIAL para o desafio porque:
+#   1. É o BÔNUS mencionado no PDF
+#   2. É Infrastructure as Code — tudo reprodutível
+#   3. O Ansible vai subir tudo sem intervenção humana
+#
+# Este arquivo diz ao Grafana: "Seu banco de dados de métricas é
+# o Prometheus que está rodando no endereço http://prometheus:9090"
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus                    # Nome que aparece no Grafana
+    type: prometheus                    # Tipo do datasource
+    access: proxy                       # Grafana faz a request (não o navegador)
+    url: http://prometheus:9090         # Endereço do Prometheus (DNS Docker)
+    isDefault: true                     # Datasource padrão para novos dashboards
+    editable: false                     # Não permite editar pela UI (mantém IaC)

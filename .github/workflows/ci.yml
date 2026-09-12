@@ -1,0 +1,107 @@
+name: CI/CD Pipeline
+
+# =============================================================================
+# CONCEITO: Este workflow roda automaticamente quando você faz push ou PR.
+# Ele verifica se o código está correto antes de aceitar mudanças.
+#
+# Adaptado do material de segurança (security.yml) para o ecossistema Go.
+# =============================================================================
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ===========================================================================
+  # Job 1: Lint e Build do Go
+  # ===========================================================================
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Verificar módulos Go
+        working-directory: ./go-app
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+
+      - name: Build da aplicação
+        working-directory: ./go-app
+        run: CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/http-server-projeto-korp .
+
+      - name: Verificar binário gerado
+        run: test -f /tmp/http-server-projeto-korp && echo "Build OK"
+
+  # ===========================================================================
+  # Job 2: Lint do Dockerfile
+  # ===========================================================================
+  docker-lint:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile com Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: go-app/Dockerfile
+
+  # ===========================================================================
+  # Job 3: Validação do Ansible
+  # ===========================================================================
+  ansible-lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar ansible-lint
+        run: pip install ansible-lint
+
+      - name: Lint do playbook Ansible
+        run: ansible-lint ansible/playbook.yml || true
+
+  # ===========================================================================
+  # Job 4: Build da imagem Docker
+  # ===========================================================================
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [build]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Build imagem Docker
+        run: docker build -t http-server-projeto-korp:test ./go-app
+
+      - name: Testar container
+        run: |
+          docker run -d --name test-app -p 8080:8080 http-server-projeto-korp:test
+          sleep 3
+          curl -sf http://localhost:8080/projeto-korp | python3 -m json.tool
+          curl -sf http://localhost:8080/health
+          docker stop test-app
