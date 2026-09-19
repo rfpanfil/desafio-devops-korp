@@ -27,7 +27,7 @@
 #   ao invés de glibc, mas como compilamos com CGO_ENABLED=0, não importa.
 # =============================================================================
 
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # "WORKDIR /app" = cria a pasta /app e entra nela (como "cd /app")
 # Todas as instruções seguintes acontecem dentro de /app
